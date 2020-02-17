@@ -1,0 +1,233 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  Creates a CodePipeline which builds a static webpage from a GitHub repository,
+  and uploads the static files to an S3 bucket
+
+# Her kan man sette opp parametre som brukeren kan
+# fylle ut når filen sendes inn til CloudFormation 
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+      # Hvordan ønsker vi å referere til parametrene fra templatefilen?
+      - Parameters:
+          - GitHubOAuthToken
+          - GitHubOwner
+          - GitHubRepo
+          - GitHubBranch
+    # Her kan vi gi parametrene navn som blir brukt
+    # utad hvis man bruker CloudFormation i nettleseren
+    ParameterLabels:
+      GitHubOAuthToken:
+        default: GitHub OAuth Token
+      GitHubOwner:
+        default: GitHub Owner
+      GitHubRepo:
+        default: GitHub Repository
+      GitHubBranch:
+        default: GitHub Branch
+
+
+# Her setter vi opp beskrivelser, typer, gyldige verdier
+# og default-verdi for parametrene
+Parameters:
+  GitHubOAuthToken:
+    Type: String
+    NoEcho: true
+    MinLength: 40
+    MaxLength: 40
+    AllowedPattern: '[a-z0-9]*'
+    Description: The OAuth token used to connect to GitHub
+  GitHubOwner:
+    Type: String
+    AllowedPattern: '[A-Za-z0-9_-]+'
+    Description: The owner of the GitHub repository
+  GitHubRepo:
+    Type: String
+    Description: The name of the GitHub repository
+  GitHubBranch:
+    Type: String
+    Default: master
+    AllowedPattern: '[A-Za-z0-9_/-]+'
+    Description: The name of the GitHub repository branch that should trigger the pipeline
+
+Resources:
+  FrontendBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      AccessControl: PublicRead
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: error.html
+    DeletionPolicy: Delete
+
+  PipelineBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+    DeletionPolicy: Delete
+
+  PipelineWebhook:
+    Type: 'AWS::CodePipeline::Webhook'
+    Properties:
+      Authentication: GITHUB_HMAC
+      AuthenticationConfiguration:
+        SecretToken: !Ref GitHubOAuthToken
+      Filters:
+        - JsonPath: $.ref
+          MatchEquals: 'refs/heads/{Branch}'
+      TargetPipeline: !Ref CodePipeline
+      TargetAction: GitHubSource
+      TargetPipelineVersion: !GetAtt CodePipeline.Version
+      RegisterWithThirdParty: true
+
+  CodeBuildProject:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      ServiceRole: !Ref CodeBuildRole
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: 'aws/codebuild/amazonlinux2-x86_64-standard:2.0-19.11.26'
+        EnvironmentVariables:
+          - Name: FRONTEND_BUCKET_NAME
+            Type: PLAINTEXT
+            Value: !Ref FrontendBucket
+      Source:
+        Type: CODEPIPELINE
+      TimeoutInMinutes: 10
+
+  CodePipeline:
+    Type: 'AWS::CodePipeline::Pipeline'
+    Properties:
+      ArtifactStore:
+        Type: S3
+        Location: !Ref PipelineBucket
+      RestartExecutionOnUpdate: true
+      RoleArn: !GetAtt 
+        - CodePipelineRole
+        - Arn
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: GitHubSource
+              InputArtifacts: []
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Provider: GitHub
+                Version: 1
+              OutputArtifacts:
+                - Name: SourceArtifact
+              Configuration:
+                Owner: !Ref GitHubOwner
+                Repo: !Ref GitHubRepo
+                Branch: !Ref GitHubBranch
+                PollForSourceChanges: false
+                OAuthToken: !Ref GitHubOAuthToken
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: CodeBuild
+              InputArtifacts:
+                - Name: SourceArtifact
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              OutputArtifacts:
+                - Name: PublicFiles
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+              RunOrder: 1
+
+  CodePipelinePolicy:
+    Type: 'AWS::IAM::ManagedPolicy'
+    Properties:
+      Description: Policy that gives CodePipeline access to the artifacts S3 bucket
+      Path: /
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: AllowS3Access
+            Effect: Allow
+            Action: 's3:*'
+            Resource:
+              - !Sub 'arn:aws:s3:::${PipelineBucket}'
+              - !Sub 'arn:aws:s3:::${PipelineBucket}/*'
+          - Sid: AllowAccessToLogs
+            Effect: Allow
+            Action: 'logs:*'
+            Resource: '*'
+          - Sid: AllowAccessToCodeBuild
+            Effect: Allow
+            Action: 'codebuild:*'
+            Resource:
+              - !Sub 'arn:aws:codebuild:*:*:project/${CodeBuildProject}'
+              - !Sub 'arn:aws:codebuild:*:*:project/${CodeBuildProject}/*'
+  CodePipelineRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: codepipeline.amazonaws.com
+          Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - !Ref CodePipelinePolicy
+
+  CodeBuildPolicy:
+    Type: 'AWS::IAM::ManagedPolicy'
+    Properties:
+      Description: >-
+        Policy that gives CodeBuild access to the pipeline and frontend S3 bucket, as well as logs
+      Path: /
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: AllowAccessToPipelineBucket
+            Effect: Allow
+            Action: 's3:*'
+            Resource:
+              - !Sub 'arn:aws:s3:::${PipelineBucket}'
+              - !Sub 'arn:aws:s3:::${PipelineBucket}/*'
+          - Sid: AllowAccessToFrontendBucket
+            Effect: Allow
+            Action: 's3:*'
+            Resource:
+              - !Sub 'arn:aws:s3:::${FrontendBucket}'
+              - !Sub 'arn:aws:s3:::${FrontendBucket}/*'
+          - Sid: AllowAccessToLogs
+            Effect: Allow
+            Action: 'logs:*'
+            Resource: '*'
+
+  CodeBuildRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      ManagedPolicyArns:
+        - !Ref CodeBuildPolicy
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - 'sts:AssumeRole'
+            Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+
+Outputs:
+  FrontendURL:
+    Description: The URL to the S3 bucket that hosts the frontend
+    Value: !GetAtt
+      - FrontendBucket
+      - WebsiteURL
+  PipelineBucketName:
+    Description: >-
+      The name of the S3 bucket used by CodePipeline to store artifacts
+    Value: !Ref PipelineBucket

@@ -1,0 +1,19 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 10
+    commands:
+      - npm install
+  build:
+    commands:
+      - npm run lint
+      - npm run build
+      - aws s3 sync ./dist s3://$FRONTEND_BUCKET_NAME --delete --acl "public-read"
+cache:
+  paths:
+    - "node_modules/**/*"
+artifacts:
+  files:
+    - "**/*"

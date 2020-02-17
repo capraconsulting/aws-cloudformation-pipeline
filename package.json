@@ -1,0 +1,22 @@
+{
+  "name": "aws-cicd-frontend",
+  "main": "dist/index.html",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "start": "parcel src/index.html",
+    "build": "rm -rf dist && parcel build src/index.html --public-url ./",
+    "lint": "eslint src/"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "eslint": "^6.8.0",
+    "eslint-config-prettier": "^6.9.0",
+    "eslint-plugin-prettier": "^3.1.2",
+    "parcel-bundler": "^1.12.4",
+    "prettier": "^1.19.1"
+  },
+  "browserslist": [
+    "last 1 Chrome version"
+  ]
+}
