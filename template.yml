@@ -3,36 +3,12 @@ Description: >-
   Creates a CodePipeline which builds a static webpage from a GitHub repository,
   and uploads the static files to an S3 bucket
 
-# Her kan man sette opp parametre som brukeren kan
-# fylle ut når filen sendes inn til CloudFormation 
-Metadata:
-  'AWS::CloudFormation::Interface':
-    ParameterGroups:
-      # Hvordan ønsker vi å referere til parametrene fra templatefilen?
-      - Parameters:
-          - GitHubOAuthToken
-          - GitHubOwner
-          - GitHubRepo
-          - GitHubBranch
-    # Her kan vi gi parametrene navn som blir brukt
-    # utad hvis man bruker CloudFormation i nettleseren
-    ParameterLabels:
-      GitHubOAuthToken:
-        default: GitHub OAuth Token
-      GitHubOwner:
-        default: GitHub Owner
-      GitHubRepo:
-        default: GitHub Repository
-      GitHubBranch:
-        default: GitHub Branch
-
-
-# Her setter vi opp beskrivelser, typer, gyldige verdier
-# og default-verdi for parametrene
+# Her setter du opp hvilke parametere du ønsker å sende inn
+# til template-filen før en CloudFormation-stack opprettes
 Parameters:
   GitHubOAuthToken:
     Type: String
-    NoEcho: true
+    NoEcho: true # Maskerer tokenet ditt med ***
     MinLength: 40
     MaxLength: 40
     AllowedPattern: '[a-z0-9]*'
@@ -57,7 +33,7 @@ Resources:
       AccessControl: PublicRead
       WebsiteConfiguration:
         IndexDocument: index.html
-        ErrorDocument: error.html
+        ErrorDocument: index.html
     DeletionPolicy: Delete
 
   PipelineBucket:
@@ -139,7 +115,7 @@ Resources:
                 Provider: CodeBuild
                 Version: 1
               OutputArtifacts:
-                - Name: PublicFiles
+                - Name: FrontendBundle
               Configuration:
                 ProjectName: !Ref CodeBuildProject
               RunOrder: 1
@@ -223,10 +199,14 @@ Resources:
 
 Outputs:
   FrontendURL:
-    Description: The URL to the S3 bucket that hosts the frontend
+    Description: The URL of the frontend application
     Value: !GetAtt
       - FrontendBucket
       - WebsiteURL
+  FrontendBucketName:
+    Description: >-
+      The name of the S3 bucket used to host the static frontend
+    Value: !Ref FrontendBucket
   PipelineBucketName:
     Description: >-
       The name of the S3 bucket used by CodePipeline to store artifacts
