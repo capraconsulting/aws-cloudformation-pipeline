@@ -1,5 +1,5 @@
 {
-  "name": "aws-cicd-frontend",
+  "name": "proof-of-concept-frontend",
   "main": "dist/index.html",
   "version": "0.0.0",
   "private": true,
